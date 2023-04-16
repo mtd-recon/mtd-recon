@@ -144,7 +144,6 @@ class MovingTargetDefense(MtdSwitch):
                                   ipv6_dst=neighbor_solicitation_multicast_addr(self.virt_addr),
                                   icmpv6_type=icmpv6.ND_NEIGHBOR_SOLICIT)
             actions.append(parser.OFPActionSetField(ipv6_dst=neighbor_solicitation_multicast_addr(self.real_addr)))
-            actions.append(parser.OFPActionSetField(eth_dst="33:33:ff:00:00:01"))
             actions.append(parser.OFPActionSetField(ipv6_nd_target=self.real_addr))
             add_flow(datapath, 1, match, actions)
 
