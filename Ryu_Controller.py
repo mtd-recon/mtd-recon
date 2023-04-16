@@ -136,52 +136,51 @@ class MovingTargetDefense(MtdSwitch):
         self.check_for_prot_hosts(eth_header, ipv6_header)
         
 
-        if ipv6_header.src == "fe80::200:ff:fe00:2" and ipv6_header.dst == neighbor_solicitation_multicast_addr(self.virt_addr) and icmpv6_header.type_ == icmpv6.ND_NEIGHBOR_SOLICIT:
+        if  ipv6_header.dst == neighbor_solicitation_multicast_addr(self.virt_addr) and icmpv6_header.type_ == icmpv6.ND_NEIGHBOR_SOLICIT:
             print("1")
             match=parser.OFPMatch(eth_type=0x86DD,
                                   in_port=in_port,
-                                  ipv6_src="fe80::200:ff:fe00:2",
+                                  ipv6_src=ipv6_header.src,
                                   ipv6_dst=neighbor_solicitation_multicast_addr(self.virt_addr),
                                   icmpv6_type=icmpv6.ND_NEIGHBOR_SOLICIT)
             actions.append(parser.OFPActionSetField(ipv6_dst=neighbor_solicitation_multicast_addr(self.real_addr)))
             actions.append(parser.OFPActionSetField(eth_dst="33:33:ff:00:00:01"))
             actions.append(parser.OFPActionSetField(ipv6_nd_target=self.real_addr))
-            actions.append(parser.OFPActionSetField(ipv6_nd_sll="00:00:00:00:00:02"))
             add_flow(datapath, 1, match, actions)
 
 
-        elif ipv6_header.src == self.real_addr and ipv6_header.dst == "fe80::200:ff:fe00:2" and icmpv6_header.type_ == icmpv6.ND_NEIGHBOR_ADVERT:
+        elif ipv6_header.src == self.real_addr and icmpv6_header.type_ == icmpv6.ND_NEIGHBOR_ADVERT:
             print("2")
             match=parser.OFPMatch(eth_type=0x86DD,
                                 in_port=in_port,
                                 ipv6_src=self.real_addr,
-                                ipv6_dst="fe80::200:ff:fe00:2",
+                                ipv6_dst=ipv6_header.dst,
                                 icmpv6_type=icmpv6.ND_NEIGHBOR_ADVERT)
             actions.append(parser.OFPActionSetField(ipv6_src=self.virt_addr))
             actions.append(parser.OFPActionSetField(ipv6_nd_target=self.virt_addr))
             add_flow(datapath, 1, match, actions)
         
-        elif ipv6_header.src == "fe80::200:ff:fe00:2" and ipv6_header.dst == self.virt_addr and icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REQUEST:
+        elif ipv6_header.dst == self.virt_addr and icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REQUEST:
             print("3")
             match=parser.OFPMatch(eth_type=0x86DD,
                                   in_port=in_port,
-                                  ipv6_src="fe80::200:ff:fe00:2",
+                                  ipv6_src=ipv6_header.src,
                                   ipv6_dst=self.virt_addr,
                                   icmpv6_type=icmpv6.ICMPV6_ECHO_REQUEST)
             actions.append(parser.OFPActionSetField(ipv6_dst=self.real_addr))
             add_flow(datapath, 1, match, actions)
 
-        elif ipv6_header.src == self.real_addr and ipv6_header.dst == "fe80::200:ff:fe00:2" and icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REPLY:
+        elif ipv6_header.src == self.real_addr and icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REPLY:
             print("4")
             match=parser.OFPMatch(eth_type=0x86DD,
                                     in_port=in_port,
                                     ipv6_src=self.real_addr,
-                                    ipv6_dst="fe80::200:ff:fe00:2",
+                                    ipv6_dst=ipv6_header.dst,
                                     icmpv6_type=icmpv6.ICMPV6_ECHO_REPLY)
             actions.append(parser.OFPActionSetField(ipv6_src=self.virt_addr))
             add_flow(datapath, 1, match, actions)
 
-        elif ipv6_header.src == "fe80::200:ff:fe00:2" and ipv6_header.dst == self.real_addr and icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REQUEST:
+        elif ipv6_header.dst == self.real_addr and icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REQUEST:
             print("5")
             return
        
