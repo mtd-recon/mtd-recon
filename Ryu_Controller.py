@@ -1,14 +1,11 @@
-from ryu.base import app_manager
 from ryu.controller import ofp_event
-from ryu.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER
+from ryu.controller.handler import  MAIN_DISPATCHER
 from ryu.controller.handler import set_ev_cls
 from ryu.controller import event
 import random
 import re
 from ryu.lib import hub
-from ryu.lib.packet import packet, ipv6, icmpv6, ethernet, ether_types
-from ryu.ofproto import ofproto_v1_3
-from ryu.lib.packet.in_proto import IPPROTO_ICMPV6
+from ryu.lib.packet import packet, ipv6, icmpv6, ethernet
 from mtd_switch import MtdSwitch, add_flow, get_out_port, get_mtd_switch_actions
 
 
@@ -187,7 +184,7 @@ class MovingTargetDefense(MtdSwitch):
         elif ipv6_header.src == "fe80::200:ff:fe00:2" and ipv6_header.dst == self.real_addr and icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REQUEST:
             print("5")
             return
-        print(v2r_ip_address_map)
+       
 
 
         ### --------------------------------------------------------------
