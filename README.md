@@ -2,34 +2,26 @@
 
 ## Description
 
-## Installation
 
-What are the steps required to install your project? Provide a step-by-step description of how to get the development environment running.
-
-## Usage
-
-### Prerequisites
+## Prerequisites
 * Ubuntu 16.04 LTS (or later)
 * Pyton 3.9 (Ryu is not compatible with 3.10)
 * Mininet 2.3.0
 * Ryu 
 
-### Installation
-
+## Installation
 ```Clone the repo
 git clone https://github.com/mtd-recon/mtd-recon.git
 ```
-    
-### Run
-* [Pascal Kunz](https://github.com/afk-proficoder)
+
+## Usage
+
 
 ## Credits
-
-List your collaborators, if any, with links to their GitHub profiles.
-
-If you used any third-party assets that require attribution, list the creators with links to their primary web presence in this section.
-
-If you followed tutorials, include links to those here as well.
+* [Pascal Kunz](https://github.com/afk-proficoder)
+* [Nicholas Mayone](https://github.com/nmayone)
+* [Gürkan Gür](https://github.com/gurgurka)
+* [Wissem Soussi](https://github.com/wsoussi)
 
 ## License
 
