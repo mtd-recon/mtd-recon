@@ -8,13 +8,20 @@ What are the steps required to install your project? Provide a step-by-step desc
 
 ## Usage
 
-Provide instructions and examples for use. Include screenshots as needed.
+### Prerequisites
+* Ubuntu 16.04 LTS (or later)
+* Pyton 3.9 (Ryu is not compatible with 3.10)
+* Mininet 2.3.0
+* Ryu 
 
-To add a screenshot, create an `assets/images` folder in your repository and upload your screenshot to it. Then, using the relative filepath, add it to your README using the following syntax:
+### Installation
 
-    ```md
-    ![alt text](assets/images/screenshot.png)
+    ```Clone the repo
+    git clone https://github.com/mtd-recon/mtd-recon.git
     ```
+    
+### Run
+
 
 ## Credits
 
