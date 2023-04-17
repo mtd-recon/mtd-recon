@@ -16,9 +16,9 @@ What are the steps required to install your project? Provide a step-by-step desc
 
 ### Installation
 
-    ```Clone the repo
-    git clone https://github.com/mtd-recon/mtd-recon.git
-    ```
+```Clone the repo
+git clone https://github.com/mtd-recon/mtd-recon.git
+```
     
 ### Run
 
