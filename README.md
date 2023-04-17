@@ -21,7 +21,7 @@ git clone https://github.com/mtd-recon/mtd-recon.git
 ```
     
 ### Run
-
+* [Pascal Kunz](https://github.com/afk-proficoder)
 
 ## Credits
 
