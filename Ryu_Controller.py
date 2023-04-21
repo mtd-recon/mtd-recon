@@ -3,15 +3,16 @@ from ryu.controller import ofp_event
 from ryu.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER
 from ryu.controller.handler import set_ev_cls
 from ryu.controller import event
-import random
+import secrets
 from ryu.lib import hub
-from ryu.lib.packet import packet, ipv6, icmpv6, ethernet, ether_types
+from ryu.lib.packet import packet, ipv6, icmpv6, ethernet, ether_types, tcp
 from ryu.ofproto import ofproto_v1_3
 import re
 
 
-r2v_addr_map = {}
-initial_shuffling_done = False
+r2v_addr_map = {"fe80::200:ff:fe00:1":"::0","fe80::200:ff:fe00:2":"::0","fe80::200:ff:fe00:3":"::0","fe80::200:ff:fe00:4":"::0","fe80::200:ff:fe00:5":"::0","fe80::200:ff:fe00:6":"::0"}
+dest_awaits_tcp_response = False
+saved_src = "::99"
 
 def neighbor_solicitation_multicast_addr(prefix,dst):
     
@@ -24,6 +25,15 @@ def neighbor_solicitation_multicast_addr(prefix,dst):
         regex_result = match.group(1)
 
     return(prefix+regex_result)
+
+def get_real_ip_addr(virtual_addr):
+    result = "::69"
+    try:
+        result = list(r2v_addr_map.keys())[list(r2v_addr_map.values()).index(virtual_addr)]
+    except ValueError:
+        print("virtual IP-Address '"+virtual_addr+"' not found in real to virtual address map")
+
+    return(result)
 
 
 def EmptyTable(datapath):
@@ -43,7 +53,7 @@ def randomize_ipv6_addr():
     ipv6_addr = "0000::"
     while not foundAddress:
         ipv6_prefix = "fe80::200:ff:fe00:"
-        ipv6_postfix = random.randbytes(1).hex()
+        ipv6_postfix = secrets.token_hex(1)
         ipv6_addr = ipv6_prefix + str(ipv6_postfix)
 
         remove_zeros = r"(?<=:)([0]{,4})"
@@ -53,6 +63,22 @@ def randomize_ipv6_addr():
         if not ipv6_addr in r2v_addr_map or not ipv6_addr in r2v_addr_map.values():
             foundAddress = True 
     return ipv6_addr
+
+def randomize_hosts(self):
+    global r2v_addr_map
+    for key in r2v_addr_map.keys():
+            r2v_addr_map[key] = randomize_ipv6_addr() 
+    print("\n")
+    print("r2v_addr_map: ",r2v_addr_map)
+    print("\n")
+    for switch in self.datapaths:
+        self.EmptyTable(switch)
+        ofProto=switch.ofproto
+        parser = switch.ofproto_parser
+        match=parser.OFPMatch()
+        actions = [parser.OFPActionOutput(ofProto.OFPP_CONTROLLER,
+                                    ofProto.OFPCML_NO_BUFFER)]
+        self.add_flow(switch, 0, match, actions)
 
 #Custom Event for time out
 class EventMessage(event.EventBase):
@@ -102,22 +128,8 @@ class MovingTargetDefense(app_manager.RyuApp):
     @set_ev_cls(EventMessage)
     def update_resources(self,ev):
         global r2v_addr_map
-        global initial_shuffling_done
 
-        for key in r2v_addr_map.keys():
-            r2v_addr_map[key] = randomize_ipv6_addr() 
-            initial_shuffling_done = True
-        print("\n")
-        print("r2v_addr_map: ",r2v_addr_map)
-        print("\n")
-        for switch in self.datapaths:
-            self.EmptyTable(switch)
-            ofProto=switch.ofproto
-            parser = switch.ofproto_parser
-            match=parser.OFPMatch()
-            actions = [parser.OFPActionOutput(ofProto.OFPP_CONTROLLER,
-                                        ofProto.OFPCML_NO_BUFFER)]
-            self.add_flow(switch, 0, match, actions)
+        randomize_hosts(self)
 
 
     def add_flow(self, datapath, priority, match, actions, buffer_id=None):
@@ -139,8 +151,9 @@ class MovingTargetDefense(app_manager.RyuApp):
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def _packet_in_handler(self, ev):
-        virt_addr_dst = "0000::"
+        global saved_src 
         global r2v_addr_map
+        global dest_awaits_tcp_response
 
         # If you hit this you might want to increase
         # the "miss_send_length" of your switch
@@ -184,75 +197,145 @@ class MovingTargetDefense(app_manager.RyuApp):
         ipv6_header = pkt.get_protocol(ipv6.ipv6)
         icmpv6_header = pkt.get_protocol(icmpv6.icmpv6)
         eth_header = pkt.get_protocol(ethernet.ethernet)
+        tcp_header = pkt.get_protocol(tcp.tcp)
 
         actions = []
+        print("ipv6_header.src: "+ipv6_header.src)
+        print("ipv6_header.dst: "+ipv6_header.dst)
+        """if not ipv6_header.src in r2v_addr_map and ipv6_header.dst == "ff02::16" and icmpv6_header.type_ == icmpv6.ND_ROUTER_SOLICIT:
+            r2v_addr_map[ipv6_header.src] = randomize_ipv6_addr()
+            print("\n")
+            print("r2v_addr_map: ",r2v_addr_map)
+            print("\n")"""
         
-        if not ipv6_header.src in r2v_addr_map and ipv6_header.dst == "ff02::2" and icmpv6_header.type_ == icmpv6.ND_ROUTER_SOLICIT:
-            r2v_addr_map[ipv6_header.src] = [eth_header.src,virt_addr_dst]
-
-        if not initial_shuffling_done:
-            return
         
-        
-        for key, value in r2v_addr_map.items():
-            """print("ipv6_header.src: ",ipv6_header.src)
-            print("ipv6_header.dst: ",ipv6_header.dst)
-            print("neighbor_solicitation_multicast_addr("ff02::1:ff00:",value): ",neighbor_solicitation_multicast_addr("ff02::1:ff00:",value))
-            print("key: ",key)
-            print("value: ",value)"""
-            if ipv6_header.dst == neighbor_solicitation_multicast_addr("ff02::1:ff00:",value) and icmpv6_header.type_ == icmpv6.ND_NEIGHBOR_SOLICIT:
-                #print("1")
+        if icmpv6_header  != None:
+            if icmpv6_header.type_ == icmpv6.ND_NEIGHBOR_SOLICIT: #and not neighbor_solicitation_multicast_addr("fe80::200:ff:fe00:",ipv6_header.dst) in r2v_addr_map:
+                print("1")
                 match=parser.OFPMatch(eth_type=0x86DD,
                                     in_port=in_port,
                                     ipv6_src=ipv6_header.src,
-                                    ipv6_dst=neighbor_solicitation_multicast_addr("ff02::1:ff00:",value),
+                                    ipv6_dst=neighbor_solicitation_multicast_addr("ff02::1:ff00:",ipv6_header.dst),
                                     icmpv6_type=icmpv6.ND_NEIGHBOR_SOLICIT)
-                actions.append(parser.OFPActionSetField(ipv6_dst=neighbor_solicitation_multicast_addr("ff02::1:ff00:",key)))
-                actions.append(parser.OFPActionSetField(eth_dst=neighbor_solicitation_multicast_addr("00:00:00:00:00:",key)))
-                actions.append(parser.OFPActionSetField(ipv6_nd_target=key))
+                actions.append(parser.OFPActionSetField(ipv6_dst=neighbor_solicitation_multicast_addr("ff02::1:ff00:",get_real_ip_addr(neighbor_solicitation_multicast_addr("fe80::200:ff:fe00:",ipv6_header.dst)))))
+                actions.append(parser.OFPActionSetField(eth_dst=neighbor_solicitation_multicast_addr("33:33:ff:00:00:",get_real_ip_addr(neighbor_solicitation_multicast_addr("fe80::200:ff:fe00:",ipv6_header.dst)))))
+                #actions.append(parser.OFPActionSetField(ipv6_nd_target=neighbor_solicitation_multicast_addr("00:00:00:00:00:",list(r2v_addr_map.values()).index(ipv6_header.src))))
+                #actions.append(parser.OFPActionSetField(ipv6_dst=neighbor_solicitation_multicast_addr("ff02::1:ff00:",list(r2v_addr_map.values()).index(ipv6_header.dst))))
+                #actions.append(parser.OFPActionSetField(ipv6_nd_target=neighbor_solicitation_multicast_addr("fe80::200:ff:fe00:",list(r2v_addr_map.values()).index(ipv6_header.dst))))
+                actions.append(parser.OFPActionSetField(ipv6_nd_target=get_real_ip_addr(neighbor_solicitation_multicast_addr("fe80::200:ff:fe00:",ipv6_header.dst))))
                 actions.append(parser.OFPActionSetField(ipv6_nd_sll=eth_header.src))
                 self.add_flow(datapath, 1, match, actions)
 
-            elif ipv6_header.src == key and icmpv6_header.type_ == icmpv6.ND_NEIGHBOR_ADVERT:
-                #print("2")
-                match=parser.OFPMatch(eth_type=0x86DD,
-                                    in_port=in_port,
-                                    ipv6_src=key,
-                                    ipv6_dst=ipv6_header.dst,
-                                    icmpv6_type=icmpv6.ND_NEIGHBOR_ADVERT)
-                actions.append(parser.OFPActionSetField(ipv6_src=value))
-                actions.append(parser.OFPActionSetField(ipv6_nd_target=value))
-                self.add_flow(datapath, 1, match, actions)
-            
-            elif ipv6_header.dst == value and icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REQUEST:
-                #print("3")
+            elif icmpv6_header.type_ == icmpv6.ND_NEIGHBOR_ADVERT:
+                print("2")
                 match=parser.OFPMatch(eth_type=0x86DD,
                                     in_port=in_port,
                                     ipv6_src=ipv6_header.src,
-                                    ipv6_dst=value,
+                                    ipv6_dst=ipv6_header.dst,
+                                    icmpv6_type=icmpv6.ND_NEIGHBOR_ADVERT)
+                actions.append(parser.OFPActionSetField(ipv6_src=r2v_addr_map[ipv6_header.src]))
+                actions.append(parser.OFPActionSetField(ipv6_nd_target=r2v_addr_map[ipv6_header.src]))
+                self.add_flow(datapath, 1, match, actions)
+            
+            elif icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REQUEST:
+                print("3")
+                match=parser.OFPMatch(eth_type=0x86DD,
+                                    in_port=in_port,
+                                    ipv6_src=ipv6_header.src,
+                                    ipv6_dst=ipv6_header.dst,
                                     icmpv6_type=icmpv6.ICMPV6_ECHO_REQUEST)
-                actions.append(parser.OFPActionSetField(ipv6_dst=key))
+                actions.append(parser.OFPActionSetField(ipv6_dst=get_real_ip_addr(ipv6_header.dst)))
                 self.add_flow(datapath, 1, match, actions)
 
-            elif ipv6_header.src == key and icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REPLY:
-                #print("4")
+            elif icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REPLY:
+                print("4")
                 match=parser.OFPMatch(eth_type=0x86DD,
                                         in_port=in_port,
                                         ipv6_src=ipv6_header.src,
                                         ipv6_dst=ipv6_header.dst,
                                         icmpv6_type=icmpv6.ICMPV6_ECHO_REPLY)
-                actions.append(parser.OFPActionSetField(ipv6_src=value))
+                actions.append(parser.OFPActionSetField(ipv6_src=r2v_addr_map[ipv6_header.src]))
                 self.add_flow(datapath, 1, match, actions)
 
-            elif ipv6_header.dst == key and icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REQUEST:
-                #print("5")
+            elif ipv6_header.dst in r2v_addr_map and icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REQUEST:
+                print("5")
                 return
+            
+        if tcp_header != None:  
+            if  tcp_header.has_flags(tcp.TCP_SYN) and ipv6_header.dst in r2v_addr_map.values():
+                print("6")
+                match=parser.OFPMatch(eth_type=0x86DD,
+                                    in_port=in_port,
+                                    ipv6_src=ipv6_header.src,
+                                    ipv6_dst=ipv6_header.dst)
+                actions.append(parser.OFPActionSetField(ipv6_dst=get_real_ip_addr(ipv6_header.dst)))
+                actions.append(parser.OFPActionSetField(eth_src=eth_header.src))
+                #self.add_flow(datapath, 1, match, actions)
+                saved_src = ipv6_header.src
+
+            elif tcp_header.has_flags(tcp.TCP_ACK, tcp.TCP_SYN):
+                print("7")
+                match=parser.OFPMatch(eth_type=0x86DD,
+                                        in_port=in_port,
+                                        ipv6_src=ipv6_header.src,
+                                        ipv6_dst=ipv6_header.dst)
+                actions.append(parser.OFPActionSetField(ipv6_src=r2v_addr_map[ipv6_header.src]))
+                actions.append(parser.OFPActionSetField(ipv6_dst=saved_src))
+                #self.add_flow(datapath, 1, match, actions)
+                dest_awaits_tcp_response=True
+
+            elif tcp_header.has_flags(tcp.TCP_PSH,tcp.TCP_ACK):
+                print("TCP PSH, ACK found")
+                if ipv6_header.dst in r2v_addr_map.values():
+                    match=parser.OFPMatch(eth_type=0x86DD,
+                                        in_port=in_port,
+                                        ipv6_src=ipv6_header.src,
+                                        ipv6_dst=ipv6_header.dst)
+                    actions.append(parser.OFPActionSetField(ipv6_dst=get_real_ip_addr(ipv6_header.src)))
+                    actions.append(parser.OFPActionSetField(eth_src=eth_header.src))
+                
+                elif ipv6_header.dst in r2v_addr_map:
+                    match=parser.OFPMatch(eth_type=0x86DD,
+                                        in_port=in_port,
+                                        ipv6_src=ipv6_header.src,
+                                        ipv6_dst=ipv6_header.dst)
+                    actions.append(parser.OFPActionSetField(ipv6_src=r2v_addr_map[ipv6_header.src]))
+                    actions.append(parser.OFPActionSetField(eth_src=eth_header.src))
+
+            
+            elif tcp_header.has_flags(tcp.TCP_ACK):
+                print("TCP ACK found")
+                if ipv6_header.dst in r2v_addr_map.values():
+                    match=parser.OFPMatch(eth_type=0x86DD,
+                                        in_port=in_port,
+                                        ipv6_src=ipv6_header.src,
+                                        ipv6_dst=ipv6_header.dst)
+                    actions.append(parser.OFPActionSetField(ipv6_dst=get_real_ip_addr(ipv6_header.src)))
+                    actions.append(parser.OFPActionSetField(eth_src=eth_header.src))
+                
+                elif ipv6_header.dst in r2v_addr_map:
+                    match=parser.OFPMatch(eth_type=0x86DD,
+                                        in_port=in_port,
+                                        ipv6_src=ipv6_header.src,
+                                        ipv6_dst=ipv6_header.dst)
+                    actions.append(parser.OFPActionSetField(ipv6_src=r2v_addr_map[ipv6_header.src]))
+                    actions.append(parser.OFPActionSetField(eth_src=eth_header.src))
+
+                
+                
+
+            elif tcp_header.has_flags(tcp.TCP_PSH):
+                print("TCP PSH found")
+
+            
+                
+            
+            
 
         ### --------------------------------------------------------------
         
         actions.append(parser.OFPActionOutput(out_port))
 
-        
         data = None
         if msg.buffer_id == ofproto.OFP_NO_BUFFER:
             data = msg.data
