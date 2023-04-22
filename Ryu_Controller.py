@@ -66,7 +66,8 @@ class MovingTargetDefense(MtdSwitch):
 
         self.virt_addr = "0000::"
         self.real_addr = "0000::"
-        self.protected_hosts = ["00:00:00:00:00:01"]
+        self.protected_hosts = ["00:00:00:00:00:01", "00:00:00:00:00:02"]
+        self.addr_map = {}
 
     def start(self):
         self.send_event_to_observers(EventMessage("TIMEOUT"))
@@ -80,15 +81,22 @@ class MovingTargetDefense(MtdSwitch):
 
     def check_for_prot_hosts(self, eth_header, ipv6_header):
         if eth_header.src in self.protected_hosts:
-            if not ipv6_header.src == self.real_addr:
-                self.real_addr = ipv6_header.src
-                print("real_addr: ",self.real_addr)
-                print("virt_addr: ",self.virt_addr)
+            if not ipv6_header.src in self.addr_map:
+                self.addr_map[ipv6_header.src] = randomize_ipv6_addr()
+                self.print_address_pair(ipv6_header.src, self.addr_map[ipv6_header.src])
+
+    def update_addr_map(self):
+        for real_addr in self.addr_map:
+            self.addr_map[real_addr] = randomize_ipv6_addr()
+            self.print_address_pair(real_addr, self.addr_map[real_addr])
+
+    def print_address_pair(self, real_addr, virt_addr):
+        print("real address: " + real_addr + " virtual address: " + virt_addr)
+
 
     @set_ev_cls(EventMessage)
     def update_resources(self,ev):
-        self.virt_addr = randomize_ipv6_addr()
-        print("virt_addr: ",self.virt_addr)
+        self.update_addr_map()
         for switch in self.datapaths:
             self.EmptyTable(switch)
             ofProto=switch.ofproto
