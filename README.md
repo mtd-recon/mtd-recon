@@ -15,7 +15,12 @@ git clone https://github.com/mtd-recon/mtd-recon.git
 ```
 
 ## Usage
-
+```
+sudo python3 network.py
+```
+```
+ryu-manager ryu_controller.py
+```
 
 ## Credits
 * [Pascal Kunz](https://github.com/afk-proficoder)

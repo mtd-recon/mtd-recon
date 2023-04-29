@@ -49,6 +49,14 @@ class MovingTargetDefense(app_manager.RyuApp):
                              "fe80::200:ff:fe00:4": "::0", 
                              "fe80::200:ff:fe00:5": "::0", 
                              "fe80::200:ff:fe00:6": "::0"}
+        self.datapaths=set()
+        self.HostAttachments={}
+        self.offset_of_mappings=0
+
+        self.virt_addr = "0000::"
+        self.real_addr = "0000::"
+        self.protected_hosts = ["00:00:00:00:00:01", "00:00:00:00:00:02"]
+        self.addr_map = {}
 
     def start(self):
         # self.send_event_to_observers(EventMessage("TIMEOUT"))
@@ -122,6 +130,25 @@ class MovingTargetDefense(app_manager.RyuApp):
         print("\n")
         print("r2v_addr_map: ", self.r2v_addr_map)
         print("\n")
+        
+    def check_for_prot_hosts(self, eth_header, ipv6_header):
+        if eth_header.src in self.protected_hosts:
+            if not ipv6_header.src in self.addr_map:
+                self.addr_map[ipv6_header.src] = randomize_ipv6_addr()
+                self.print_address_pair(ipv6_header.src, self.addr_map[ipv6_header.src])
+
+    def update_addr_map(self):
+        for real_addr in self.addr_map:
+            self.addr_map[real_addr] = randomize_ipv6_addr()
+            self.print_address_pair(real_addr, self.addr_map[real_addr])
+
+    def print_address_pair(self, real_addr, virt_addr):
+        print("real address: " + real_addr + " virtual address: " + virt_addr)
+
+
+    @set_ev_cls(EventMessage)
+    def update_resources(self,ev):
+        self.update_addr_map()
         for switch in self.datapaths:
             self.EmptyTable(switch)
             ofProto = switch.ofproto
