@@ -52,7 +52,7 @@ class MovingTargetDefense(MtdSwitch):
         self.datapaths=set()
         self.HostAttachments={}
         self.offset_of_mappings=0
-
+        self.answer_to_ICMP_SOLICIT=False
         self.protected_hosts = ["00:00:00:00:00:01", "00:00:00:00:00:02"]
         self.addr_map = {}
 
@@ -80,7 +80,7 @@ class MovingTargetDefense(MtdSwitch):
 
     def check_for_prot_hosts(self, eth_header, ipv6_header):
         if eth_header.src in self.protected_hosts:
-            if not ipv6_header.src in self.addr_map:
+            if not ipv6_header.src in self.addr_map and ipv6_header.src != "::":
                 self.addr_map[ipv6_header.src] = randomize_ipv6_addr()
                 self.print_address_pair(ipv6_header.src, self.addr_map[ipv6_header.src])
 
@@ -99,13 +99,11 @@ class MovingTargetDefense(MtdSwitch):
             raise Exception("No real ip for virt ip: " + virt_ip)
         
 
-    def handle_icmpv6_packets(self, icmpv6_header, ipv6_header, eth_header, actions, parser):            
-            if ipv6_header.src in self.addr_map or ipv6_header.dst in self.addr_map or neighbor_solicitation_multicast_addr(
+    def handle_icmpv6_packets(self, icmpv6_header, ipv6_header, eth_header, actions, parser):
+            if ipv6_header.src in self.addr_map.keys() or ipv6_header.src in self.addr_map.values()  or ipv6_header.dst in self.addr_map.values() or neighbor_solicitation_multicast_addr(
                             "fe80::200:ff:fe00:",ipv6_header.dst) in self.addr_map.values():
-                if icmpv6_header.type_ == icmpv6.ND_NEIGHBOR_SOLICIT and eth_header.src not in self.protected_hosts and ipv6_header.src != "::":
-                        if neighbor_solicitation_multicast_addr("fe80::200:ff:fe00:",ipv6_header.dst) in self.addr_map:
-                            print(1)
-                            return
+                if icmpv6_header.type_ == icmpv6.ND_NEIGHBOR_SOLICIT and ipv6_header.src != "::" and eth_header.src not in self.protected_hosts:
+                        print("1")
                         actions.append(parser.OFPActionSetField(ipv6_dst=neighbor_solicitation_multicast_addr(
                             "ff02::1:ff00:", self.get_real_ip(neighbor_solicitation_multicast_addr("fe80::200:ff:fe00:", ipv6_header.dst)))))
                         actions.append(parser.OFPActionSetField(eth_dst=neighbor_solicitation_multicast_addr(
@@ -113,54 +111,56 @@ class MovingTargetDefense(MtdSwitch):
                         actions.append(parser.OFPActionSetField(ipv6_nd_target=self.get_real_ip(
                             neighbor_solicitation_multicast_addr("fe80::200:ff:fe00:", ipv6_header.dst))))
                         actions.append(parser.OFPActionSetField(ipv6_nd_sll=eth_header.src))
-                        print(2)
+                        self.answer_to_ICMP_SOLICIT=True
                         
-                elif icmpv6_header.type_ == icmpv6.ND_NEIGHBOR_ADVERT and eth_header.src in self.protected_hosts:
+                elif icmpv6_header.type_ == icmpv6.ND_NEIGHBOR_ADVERT and not eth_header.src in self.protected_hosts or self.answer_to_ICMP_SOLICIT:
+                        print("2")
                         actions.append(parser.OFPActionSetField(
                             ipv6_src=self.addr_map[ipv6_header.src]))
                         actions.append(parser.OFPActionSetField(
                             ipv6_nd_target=self.addr_map[ipv6_header.src]))
-                        print(3)
+                        self.answer_to_ICMP_SOLICIT=False
 
                 elif icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REQUEST and eth_header.src not in self.protected_hosts and ipv6_header.dst not in self.addr_map.keys():
+                    print("3")
                     actions.append(parser.OFPActionSetField(
                         ipv6_dst=self.get_real_ip(ipv6_header.dst)))
-                    print(4)
 
                 elif icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REPLY and eth_header.src in self.protected_hosts:
+                    print("4")
                     actions.append(parser.OFPActionSetField(ipv6_src=self.addr_map[ipv6_header.src]))
-                    print(5)
+
 
                 
 
 
     def handle_tcp_packets(self, tcp_header, ipv6_header, actions, parser):
         valid_tcp_packet=False
-        if tcp_header.has_flags(tcp.TCP_SYN) and not tcp_header.has_flags(tcp.TCP_ACK) and ipv6_header.dst in self.addr_map.values():
-            actions.append(parser.OFPActionSetField(ipv6_dst=self.get_real_ip(ipv6_header.dst)))
-            valid_tcp_packet=True
-
-        elif tcp_header.has_flags(tcp.TCP_ACK, tcp.TCP_SYN):
-            actions.append(parser.OFPActionSetField(
-                ipv6_src=self.addr_map[ipv6_header.src]))
-            valid_tcp_packet=True
-            
-        elif tcp_header.has_flags(tcp.TCP_PSH,tcp.TCP_ACK):
-            if ipv6_header.dst in self.addr_map.values():
+        if ipv6_header.src in self.addr_map.keys() or ipv6_header.src in self.addr_map.values() or ipv6_header.dst in self.addr_map.keys() or ipv6_header.dst in self.addr_map.values():
+            if tcp_header.has_flags(tcp.TCP_SYN) and not tcp_header.has_flags(tcp.TCP_ACK) and ipv6_header.dst in self.addr_map.values():
                 actions.append(parser.OFPActionSetField(ipv6_dst=self.get_real_ip(ipv6_header.dst)))
                 valid_tcp_packet=True
 
-            elif ipv6_header.src in self.addr_map.keys():
+            elif tcp_header.has_flags(tcp.TCP_ACK, tcp.TCP_SYN):
                 actions.append(parser.OFPActionSetField(ipv6_src=self.addr_map[ipv6_header.src]))
                 valid_tcp_packet=True
+                
+            elif tcp_header.has_flags(tcp.TCP_PSH,tcp.TCP_ACK):
+                if ipv6_header.dst in self.addr_map.values():
+                    actions.append(parser.OFPActionSetField(ipv6_dst=self.get_real_ip(ipv6_header.dst)))
+                    valid_tcp_packet=True
 
-        elif tcp_header.has_flags(tcp.TCP_ACK):
-            if ipv6_header.dst in self.addr_map.values():
-                actions.append(parser.OFPActionSetField(ipv6_dst=self.get_real_ip(ipv6_header.dst)))
-                valid_tcp_packet=True
-            elif ipv6_header.src in self.addr_map.keys():
-                actions.append(parser.OFPActionSetField(ipv6_src=self.addr_map[ipv6_header.src]))
-                valid_tcp_packet=True
+                elif ipv6_header.src in self.addr_map.keys():
+                    actions.append(parser.OFPActionSetField(ipv6_src=self.addr_map[ipv6_header.src]))
+                    valid_tcp_packet=True
+
+            elif tcp_header.has_flags(tcp.TCP_ACK):
+                if ipv6_header.dst in self.addr_map.values():
+                    actions.append(parser.OFPActionSetField(ipv6_dst=self.get_real_ip(ipv6_header.dst)))
+                    valid_tcp_packet=True
+                elif ipv6_header.src in self.addr_map.keys():
+                    actions.append(parser.OFPActionSetField(ipv6_src=self.addr_map[ipv6_header.src]))
+                    valid_tcp_packet=True
         return valid_tcp_packet
 
 
@@ -269,8 +269,8 @@ class MovingTargetDefense(MtdSwitch):
         
         if icmpv6_header != None:
             if icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REQUEST and eth_header.src not in self.protected_hosts and ipv6_header.dst in self.addr_map.keys():
-                print("kill")
                 return
+
             self.handle_icmpv6_packets(icmpv6_header, ipv6_header, eth_header, actions, parser)
 
         valid_tcp_packet = False
@@ -297,5 +297,3 @@ class MovingTargetDefense(MtdSwitch):
         out = parser.OFPPacketOut(datapath=datapath, buffer_id=msg.buffer_id,
                                 in_port=in_port, actions=actions, data=data)
         datapath.send_msg(out)
-    
-    
