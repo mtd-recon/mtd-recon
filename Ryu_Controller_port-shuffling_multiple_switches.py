@@ -41,7 +41,7 @@ class MovingTargetDefense(app_manager.RyuApp):
         super(MovingTargetDefense, self).__init__(*args, **kwargs)
         self.mac_to_port = {}
         self.datapaths = set()
-        self.HostAttachments = {}
+        self.host_attachments = {}
         self.offset_of_mappings = 0
         self.r2v_port_map = {22: 0, 
                              443: 0, 
@@ -146,13 +146,13 @@ class MovingTargetDefense(app_manager.RyuApp):
                     neighbor_solicitation_multicast_addr("fe80::200:ff:fe00:", ipv6_header.dst))))
                 actions.append(parser.OFPActionSetField(ipv6_nd_sll=eth_header.src))
                     
-        elif icmpv6_header.type_ == icmpv6.ND_NEIGHBOR_ADVERT and ipv6_header.src in self.r2v_addr_map and datapath.id == self.HostAttachments[ipv6_header.src]:
+        elif icmpv6_header.type_ == icmpv6.ND_NEIGHBOR_ADVERT and ipv6_header.src in self.r2v_addr_map and datapath.id == self.host_attachments[ipv6_header.src]:
                 actions.append(parser.OFPActionSetField(
                     ipv6_src=self.r2v_addr_map[ipv6_header.src]))
                 actions.append(parser.OFPActionSetField(
                     ipv6_nd_target=self.r2v_addr_map[ipv6_header.src]))
 
-        elif icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REQUEST and ipv6_header.src in self.r2v_addr_map and datapath.id == self.HostAttachments[ipv6_header.src]:
+        elif icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REQUEST and ipv6_header.src in self.r2v_addr_map and datapath.id == self.host_attachments[ipv6_header.src]:
             actions.append(parser.OFPActionSetField(
                 ipv6_dst=self.get_real_ip_addr(ipv6_header.dst)))
 
@@ -165,7 +165,7 @@ class MovingTargetDefense(app_manager.RyuApp):
             if tcp_header.has_flags(tcp.TCP_SYN) and not tcp_header.has_flags(tcp.TCP_ACK) and tcp_header.dst_port in self.r2v_port_map.values():
                     actions.append(parser.OFPActionSetField(tcp_dst=self.get_real_port(tcp_header.dst_port)))
 
-            elif tcp_header.has_flags(tcp.TCP_ACK, tcp.TCP_SYN) and datapath.id == self.HostAttachments[ipv6_header.src]:
+            elif tcp_header.has_flags(tcp.TCP_ACK, tcp.TCP_SYN) and datapath.id == self.host_attachments[ipv6_header.src]:
                 actions.append(parser.OFPActionSetField(tcp_src=self.r2v_port_map[tcp_header.src_port]))
                 
             elif tcp_header.has_flags(tcp.TCP_PSH,tcp.TCP_ACK):
@@ -272,8 +272,8 @@ class MovingTargetDefense(app_manager.RyuApp):
             self.handle_icmpv6_packets(icmpv6_header, ipv6_header, eth_header, actions, parser, datapath)"""
         
 
-        if ipv6_header.src not in self.HostAttachments.keys():
-                self.HostAttachments[ipv6_header.src]=datapath.id
+        if ipv6_header.src not in self.host_attachments.keys():
+                self.host_attachments[ipv6_header.src]=datapath.id
 
         if tcp_header != None and (tcp_header.src_port in self.r2v_port_map.keys() or tcp_header.src_port in self.r2v_port_map.values() or tcp_header.dst_port in self.r2v_port_map.keys() or tcp_header.dst_port in self.r2v_port_map.values()):
             self.handle_tcp_packets(tcp_header, ipv6_header, actions, parser, datapath)
