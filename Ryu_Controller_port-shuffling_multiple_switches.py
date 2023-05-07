@@ -275,11 +275,11 @@ class MovingTargetDefense(app_manager.RyuApp):
         if ipv6_header.src not in self.host_attachments.keys():
                 self.host_attachments[ipv6_header.src]=datapath.id
 
-        if tcp_header != None and (tcp_header.src_port in self.r2v_port_map.keys() or tcp_header.src_port in self.r2v_port_map.values() or tcp_header.dst_port in self.r2v_port_map.keys() or tcp_header.dst_port in self.r2v_port_map.values()):
+        if tcp_header != None:
             self.handle_tcp_packets(tcp_header, ipv6_header, actions, parser, datapath)
         
-        if udp_header != None and (udp_header.src_port in self.r2v_port_map.keys() or udp_header.src_port in self.r2v_port_map.values() or udp_header.dst_port in self.r2v_port_map.keys() or udp_header.dst_port in self.r2v_port_map.values()):
-            self.handle_udp_packets(udp_header, ipv6_header, actions, parser, datapath)  
+        if udp_header != None:
+            self.handle_udp_packets(udp_header, actions, parser)  
             
         actions.append(parser.OFPActionOutput(out_port))
 
