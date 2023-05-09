@@ -6,13 +6,12 @@ import random
 import re
 from ryu.lib import hub
 from ryu.lib.packet import packet, ipv6, icmpv6, ethernet, tcp, udp
+from ryu.lib.packet.icmpv6 import nd_neighbor
 from mtd_switch import MtdSwitch
-
-
 
 def neighbor_solicitation_multicast_addr(prefix, dst):
 
-    last_pattern = r"(?<=:)([0-9a-fA-F]{,2})$"
+    last_pattern = r"(?<=:)([0-9a-fA-F]{,4})$"
 
     regex_result = ""
 
@@ -23,13 +22,20 @@ def neighbor_solicitation_multicast_addr(prefix, dst):
     return (prefix+regex_result)
 
 def randomize_ipv6_addr():
-    ipv6_prefix = "fe80::200:ff:fe00:"
-    ipv6_postfix = random.randbytes(1).hex()
-    ipv6_addr = ipv6_prefix + str(ipv6_postfix)
+    nr_of_groups = 8
+    ipv6_addr = "fe80::"
+    byte_group_delimiter = ":"
+    
+    for i in range(nr_of_groups-4):
+        two_byte_group = random.randbytes(2).hex()
+        if i == nr_of_groups - 5:
+            ipv6_addr = ipv6_addr + str(two_byte_group)
+        else:
+            ipv6_addr = ipv6_addr + str(two_byte_group) + byte_group_delimiter
 
-    remove_zeros = r"(?<=:)([0]{,4})"
+    remove_leading_zeros = r"(?<=:)([0]{,4})"
 
-    ipv6_addr = re.sub(remove_zeros, '', ipv6_addr)
+    ipv6_addr = re.sub(remove_leading_zeros, '', ipv6_addr)
 
     return ipv6_addr
 
@@ -64,7 +70,7 @@ class MovingTargetDefense(MtdSwitch):
     def TimerEventGen(self):
         while 1:
             self.send_event_to_observers(EventMessage("TIMEOUT"))
-            hub.sleep(90)
+            hub.sleep(60)
 
     def EmptyTable(self, datapath):
         '''
@@ -98,24 +104,15 @@ class MovingTargetDefense(MtdSwitch):
         else:
             raise Exception("No real ip for virt ip: " + virt_ip)
         
-        result = "::69"
-        try:
-            result = list(self.addr_map.keys())[list(r2v_addr_map.values()).index(virtual_addr)]
-        except ValueError:
-            print("virtual IP-Address '"+virtual_addr+"' not found in real to virtual address map")
-        
 
     def handle_icmpv6_packets(self, icmpv6_header, ipv6_header, eth_header, actions, parser, datapath):
-            if ipv6_header.src in self.addr_map.keys() or ipv6_header.src in self.addr_map.values() or neighbor_solicitation_multicast_addr(
-                            "fe80::200:ff:fe00:",ipv6_header.dst) in self.addr_map.values() or neighbor_solicitation_multicast_addr(
-                            "fe80::200:ff:fe00:",ipv6_header.dst) in self.addr_map.values():
-                if icmpv6_header.type_ == icmpv6.ND_NEIGHBOR_SOLICIT and neighbor_solicitation_multicast_addr("fe80::200:ff:fe00:",ipv6_header.dst) in self.addr_map.values() and ipv6_header.src != "::":
+            if ipv6_header.src in self.addr_map.keys() or ipv6_header.src in self.addr_map.values() or (type(icmpv6_header.data) is nd_neighbor and icmpv6_header.data.dst in self.addr_map.values()) or ipv6_header.dst in self.addr_map.values():
+                if icmpv6_header.type_ == icmpv6.ND_NEIGHBOR_SOLICIT and icmpv6_header.data.dst in self.addr_map.values() and ipv6_header.src != "::":
                         actions.append(parser.OFPActionSetField(ipv6_dst=neighbor_solicitation_multicast_addr(
-                            "ff02::1:ff00:", self.get_real_ip(neighbor_solicitation_multicast_addr("fe80::200:ff:fe00:", ipv6_header.dst)))))
+                            "ff02::1:ff00:", self.get_real_ip(icmpv6_header.data.dst))))
                         actions.append(parser.OFPActionSetField(eth_dst=neighbor_solicitation_multicast_addr(
-                            "33:33:ff:00:00:", self.get_real_ip(neighbor_solicitation_multicast_addr("fe80::200:ff:fe00:", ipv6_header.dst)))))
-                        actions.append(parser.OFPActionSetField(ipv6_nd_target=self.get_real_ip(
-                            neighbor_solicitation_multicast_addr("fe80::200:ff:fe00:", ipv6_header.dst))))
+                            "33:33:ff:00:00:", self.get_real_ip(icmpv6_header.data.dst))))
+                        actions.append(parser.OFPActionSetField(ipv6_nd_target=self.get_real_ip(icmpv6_header.data.dst)))
                         actions.append(parser.OFPActionSetField(ipv6_nd_sll=eth_header.src))
                         self.answer_to_ICMP_SOLICIT=True
                         self.saved_datapath_id=datapath.id
@@ -263,15 +260,13 @@ class MovingTargetDefense(MtdSwitch):
                 self.HostAttachments[ipv6_header.src]=datapath.id
         
         if icmpv6_header != None:
-            
-            
-            if icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REQUEST and eth_header.src not in self.protected_hosts and ipv6_header.dst in self.addr_map.keys() and datapath.id == self.HostAttachments[ipv6_header.src]:
+        
+            if icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REQUEST and ipv6_header.dst in self.addr_map.keys() and datapath.id == self.HostAttachments[ipv6_header.src]: 
                 return
     
 
-            elif icmpv6_header.type_ == icmpv6.ND_NEIGHBOR_ADVERT and not self.answer_to_ICMP_SOLICIT and ipv6_header.src in self.addr_map.keys() and datapath.id == self.HostAttachments[ipv6_header.dst]:
+            elif icmpv6_header.type_ == icmpv6.ND_NEIGHBOR_ADVERT and not self.answer_to_ICMP_SOLICIT and ipv6_header.src in self.addr_map.keys() and datapath.id == self.HostAttachments[ipv6_header.dst] and (type(icmpv6_header.data) is nd_neighbor and icmpv6_header.data.option != None):
                 return
-
 
             self.handle_icmpv6_packets(icmpv6_header, ipv6_header, eth_header, actions, parser, datapath)
 
