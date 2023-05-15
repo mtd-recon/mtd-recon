@@ -7,19 +7,8 @@ import secrets
 from ryu.lib import hub
 from ryu.lib.packet import packet, ipv6, icmpv6, ethernet, ether_types, tcp, udp
 from ryu.ofproto import ofproto_v1_3
+from ryu.lib.packet.in_proto import IPPROTO_TCP
 import re
-
-def neighbor_solicitation_multicast_addr(prefix, dst):
-
-    last_pattern = r"(?<=:)([0-9a-fA-F]{,2})$"
-
-    regex_result = ""
-
-    match = re.search(last_pattern, dst)
-    if match:
-        regex_result = match.group(1)
-
-    return (prefix+regex_result)
 
 
 # Custom Event for time out
@@ -44,10 +33,11 @@ class MovingTargetDefense(app_manager.RyuApp):
         self.host_attachments = {}
         self.offset_of_mappings = 0
         self.r2v_port_map = {22: 0, 
-                             443: 0, 
-                             80: 0,
-                             764: 0,
-                             5201: 0}
+                            443: 0, 
+                            80: 0,
+                            764: 0,
+                            5201: 0}
+        self.legit_TCP_SYN_ACK_MSG = False
 
     def start(self):
         # self.send_event_to_observers(EventMessage("TIMEOUT"))
@@ -60,27 +50,38 @@ class MovingTargetDefense(app_manager.RyuApp):
                 print("please start the mininet topology")
             else:
                 self.send_event_to_observers(EventMessage("TIMEOUT"))
-            hub.sleep(30)
+            hub.sleep(120)
+
+    def create_tcp_RST_ACK_packet(self,datapath,src_ip,src_mac,src_port,dst_ip,dst_mac,dst_port,ack,out_port):
+        # Define the Ethernet, IPv6 and TCP headers                                 
+        eth_h = ethernet.ethernet(src=src_mac, dst=dst_mac, ethertype=0x86DD)
+        ipv6_h = ipv6.ipv6(src=src_ip, dst=dst_ip, nxt=IPPROTO_TCP, hop_limit=64)
+        tcp_h = tcp.tcp(src_port=src_port, dst_port=dst_port, bits=0b10100, seq=0, ack=ack, offset=5, window_size=0, option=None)
+
+        # Create the OpenFlow packet_out message
+        actions = [datapath.ofproto_parser.OFPActionOutput(out_port)]
+        out_packet = packet.Packet()
+        out_packet.add_protocol(eth_h)
+        out_packet.add_protocol(ipv6_h)
+        out_packet.add_protocol(tcp_h)
+        out_packet.serialize()
+        packet_out = datapath.ofproto_parser.OFPPacketOut(
+            datapath=datapath,
+            buffer_id=datapath.ofproto.OFP_NO_BUFFER,
+            in_port=datapath.ofproto.OFPP_CONTROLLER,
+            actions=actions,
+            data=out_packet.data)
+        # Send the packet_out message
+        datapath.send_msg(packet_out)
 
     def randomize_port(self):
         foundPort = False
         result = "0"
         while not foundPort:
             result = secrets.SystemRandom().randrange(1, 65535)
-            if not result in self.r2v_port_map and not result in self.r2v_port_map.values():
+            if not result in self.r2v_port_map.keys() and not result in self.r2v_port_map.values():
                 foundPort = True
         return result
-
-    def get_real_ip_addr(self, virtual_addr):
-        result = "::69"
-        try:
-            result = list(self.r2v_addr_map.keys())[
-                        list(self.r2v_addr_map.values()).index(virtual_addr)]
-        except ValueError:
-            print("virtual IP-Address '"+virtual_addr +
-                "' not found in real to virtual address map")
-
-        return (result)
     
     def get_real_port(self, virtual_port):
         result = "0"
@@ -103,7 +104,7 @@ class MovingTargetDefense(app_manager.RyuApp):
         parser = datapath.ofproto_parser
         match = parser.OFPMatch()
         flow_mod = datapath.ofproto_parser.OFPFlowMod(datapath, 0, 0, 0, ofProto.OFPFC_DELETE, 0, 0, 1,
-                                                      ofProto.OFPCML_NO_BUFFER, ofProto.OFPP_ANY, ofProto.OFPG_ANY, 0, match=match, instructions=[])
+                                                        ofProto.OFPCML_NO_BUFFER, ofProto.OFPP_ANY, ofProto.OFPG_ANY, 0, match=match, instructions=[])
         datapath.send_msg(flow_mod)
 
 
@@ -115,7 +116,7 @@ class MovingTargetDefense(app_manager.RyuApp):
         self.datapaths.add(datapath)
         match = parser.OFPMatch()
         actions = [parser.OFPActionOutput(ofproto.OFPP_CONTROLLER,
-                                          ofproto.OFPCML_NO_BUFFER)]
+                                            ofproto.OFPCML_NO_BUFFER)]
         self.add_flow(datapath, 0, match, actions)
 
     @set_ev_cls(EventMessage)
@@ -134,48 +135,23 @@ class MovingTargetDefense(app_manager.RyuApp):
                                         ofProto.OFPCML_NO_BUFFER)]
             self.add_flow(switch, 0, match, actions)
 
-    def handle_icmpv6_packets(self, icmpv6_header, ipv6_header, eth_header, actions, parser, datapath):
-        if icmpv6_header.type_ == icmpv6.ND_NEIGHBOR_SOLICIT:
-                if neighbor_solicitation_multicast_addr("fe80::200:ff:fe00:",ipv6_header.dst) in self.r2v_addr_map:
-                    return
-                actions.append(parser.OFPActionSetField(ipv6_dst=neighbor_solicitation_multicast_addr(
-                    "ff02::1:ff00:", self.get_real_ip_addr(neighbor_solicitation_multicast_addr("fe80::200:ff:fe00:", ipv6_header.dst)))))
-                actions.append(parser.OFPActionSetField(eth_dst=neighbor_solicitation_multicast_addr(
-                    "33:33:ff:00:00:", self.get_real_ip_addr(neighbor_solicitation_multicast_addr("fe80::200:ff:fe00:", ipv6_header.dst)))))
-                actions.append(parser.OFPActionSetField(ipv6_nd_target=self.get_real_ip_addr(
-                    neighbor_solicitation_multicast_addr("fe80::200:ff:fe00:", ipv6_header.dst))))
-                actions.append(parser.OFPActionSetField(ipv6_nd_sll=eth_header.src))
-                    
-        elif icmpv6_header.type_ == icmpv6.ND_NEIGHBOR_ADVERT and ipv6_header.src in self.r2v_addr_map and datapath.id == self.host_attachments[ipv6_header.src]:
-                actions.append(parser.OFPActionSetField(
-                    ipv6_src=self.r2v_addr_map[ipv6_header.src]))
-                actions.append(parser.OFPActionSetField(
-                    ipv6_nd_target=self.r2v_addr_map[ipv6_header.src]))
-
-        elif icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REQUEST and ipv6_header.src in self.r2v_addr_map and datapath.id == self.host_attachments[ipv6_header.src]:
-            actions.append(parser.OFPActionSetField(
-                ipv6_dst=self.get_real_ip_addr(ipv6_header.dst)))
-
-        elif icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REPLY:
-            actions.append(parser.OFPActionSetField(ipv6_src=self.r2v_addr_map[ipv6_header.src]))
-
-
     def handle_tcp_packets(self, tcp_header, ipv6_header, actions, parser, datapath):
-        
-            if tcp_header.has_flags(tcp.TCP_SYN) and not tcp_header.has_flags(tcp.TCP_ACK) and tcp_header.dst_port in self.r2v_port_map.values():
+            if tcp_header.has_flags(tcp.TCP_SYN) and not tcp_header.has_flags(tcp.TCP_ACK) and tcp_header.dst_port in self.r2v_port_map.values() and datapath.id == self.host_attachments[ipv6_header.src]:
                     actions.append(parser.OFPActionSetField(tcp_dst=self.get_real_port(tcp_header.dst_port)))
+                    self.legit_TCP_SYN_ACK_MSG=True
 
-            elif tcp_header.has_flags(tcp.TCP_ACK, tcp.TCP_SYN) and datapath.id == self.host_attachments[ipv6_header.src]:
+            elif tcp_header.has_flags(tcp.TCP_SYN, tcp.TCP_ACK) and tcp_header.src_port in self.r2v_port_map.keys() and datapath.id == self.host_attachments[ipv6_header.src] and self.legit_TCP_SYN_ACK_MSG:
                 actions.append(parser.OFPActionSetField(tcp_src=self.r2v_port_map[tcp_header.src_port]))
-                
-            elif tcp_header.has_flags(tcp.TCP_PSH,tcp.TCP_ACK):
+                self.legit_TCP_SYN_ACK_MSG=False
+
+            elif tcp_header.has_flags(tcp.TCP_PSH,tcp.TCP_ACK) and datapath.id == self.host_attachments[ipv6_header.src]:
                 if tcp_header.dst_port in self.r2v_port_map.values():
                     actions.append(parser.OFPActionSetField(tcp_dst=self.get_real_port(tcp_header.dst_port)))
 
                 elif tcp_header.src_port in self.r2v_port_map.keys():
                     actions.append(parser.OFPActionSetField(tcp_src=self.r2v_port_map[tcp_header.src_port]))
 
-            elif tcp_header.has_flags(tcp.TCP_ACK) and not tcp_header.has_flags(tcp.TCP_RST):
+            elif tcp_header.has_flags(tcp.TCP_ACK) and not tcp_header.has_flags(tcp.TCP_RST) and not tcp_header.has_flags(tcp.TCP_SYN) and datapath.id == self.host_attachments[ipv6_header.src]:
                 if tcp_header.dst_port in self.r2v_port_map.values():
                     actions.append(parser.OFPActionSetField(tcp_dst=self.get_real_port(tcp_header.dst_port)))
 
@@ -183,11 +159,11 @@ class MovingTargetDefense(app_manager.RyuApp):
                     actions.append(parser.OFPActionSetField(tcp_src=self.r2v_port_map[tcp_header.src_port]))
 
 
-    def handle_udp_packets(self, udp_header, actions, parser):
-        if udp_header.dst_port in self.r2v_port_map.values():
+    def handle_udp_packets(self, udp_header, ipv6_header, actions, parser, datapath):
+        if udp_header.dst_port in self.r2v_port_map.values() and datapath.id == self.host_attachments[ipv6_header.src]:
                 actions.append(parser.OFPActionSetField(udp_dst=self.get_real_port(udp_header.dst_port)))
 
-        elif udp_header.src_port in self.r2v_port_map.keys():
+        elif udp_header.src_port in self.r2v_port_map.keys() and datapath.id == self.host_attachments[ipv6_header.src]:
             actions.append(parser.OFPActionSetField(udp_src=self.r2v_port_map[udp_header.src_port]))
 
 
@@ -201,7 +177,7 @@ class MovingTargetDefense(app_manager.RyuApp):
         parser = datapath.ofproto_parser
 
         inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS,
-                                             actions)]
+                                                actions)]
         if buffer_id:
             if hard_timeout == None:
                 mod = parser.OFPFlowMod(datapath=datapath, buffer_id=buffer_id,
@@ -229,7 +205,7 @@ class MovingTargetDefense(app_manager.RyuApp):
 
         if ev.msg.msg_len < ev.msg.total_len:
             self.logger.debug("packet truncated: only %s of %s bytes",
-                              ev.msg.msg_len, ev.msg.total_len)
+                                ev.msg.msg_len, ev.msg.total_len)
         msg = ev.msg
         datapath = msg.datapath
         ofproto = datapath.ofproto
@@ -268,20 +244,32 @@ class MovingTargetDefense(app_manager.RyuApp):
 
         actions = []
 
-        """if icmpv6_header != None:
-            self.handle_icmpv6_packets(icmpv6_header, ipv6_header, eth_header, actions, parser, datapath)"""
-        
-
         if ipv6_header.src not in self.host_attachments.keys():
                 self.host_attachments[ipv6_header.src]=datapath.id
 
         if tcp_header != None:
+            #check if dst port is not protected, if it is, create a TCP RST ACK packet and send as answer of the packet and drop the old answer 
+            if not self.legit_TCP_SYN_ACK_MSG and tcp_header.has_flags(tcp.TCP_ACK, tcp.TCP_SYN) and tcp_header.src_port in self.r2v_port_map.keys() and datapath.id == self.host_attachments[ipv6_header.src]:
+                self.create_tcp_RST_ACK_packet(datapath,ipv6_header.src,eth.src,tcp_header.src_port,ipv6_header.dst,eth.dst,tcp_header.dst_port,tcp_header.ack,out_port)
+                return
             self.handle_tcp_packets(tcp_header, ipv6_header, actions, parser, datapath)
         
-        if udp_header != None:
-            self.handle_udp_packets(udp_header, actions, parser)  
+        if udp_header != None:  
+            self.handle_udp_packets(udp_header, ipv6_header, actions, parser, datapath)  
             
         actions.append(parser.OFPActionOutput(out_port))
+
+        if tcp_header != None: 
+            # ip_proto=6 => 6 = TCP
+            match = parser.OFPMatch(eth_type=0x86DD, in_port=in_port, tcp_src=tcp_header.src_port, tcp_dst=tcp_header.dst_port, eth_dst=dst, ip_proto=6)
+
+            self.add_flow(datapath, 1, match, actions)
+
+        if udp_header != None:
+            # ip_proto=17 => 17 = UDP
+            match = parser.OFPMatch(eth_type=0x86DD, in_port=in_port, udp_src=udp_header.src_port, udp_dst=udp_header.dst_port, eth_dst=dst, ip_proto=17)
+
+            self.add_flow(datapath, 1, match, actions)
 
         ### --------------------------------------------------------------
         
@@ -294,4 +282,3 @@ class MovingTargetDefense(app_manager.RyuApp):
         out = parser.OFPPacketOut(datapath=datapath, buffer_id=msg.buffer_id,
                                 in_port=in_port, actions=actions, data=data)
         datapath.send_msg(out)
-
