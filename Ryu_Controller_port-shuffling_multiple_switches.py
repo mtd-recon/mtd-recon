@@ -33,10 +33,10 @@ class MovingTargetDefense(app_manager.RyuApp):
         self.host_attachments = {}
         self.offset_of_mappings = 0
         self.r2v_port_map = {22: 0, 
-                            443: 0, 
-                            80: 0,
-                            764: 0,
-                            5201: 0}
+                             443: 0, 
+                             80: 0,
+                             764: 0,
+                             5201: 0}
         self.legit_TCP_SYN_ACK_MSG = False
 
     def start(self):
@@ -50,9 +50,9 @@ class MovingTargetDefense(app_manager.RyuApp):
                 print("please start the mininet topology")
             else:
                 self.send_event_to_observers(EventMessage("TIMEOUT"))
-            hub.sleep(120)
+            hub.sleep(1000)
 
-    def create_tcp_RST_ACK_packet(self,datapath,src_ip,src_mac,src_port,dst_ip,dst_mac,dst_port,ack,out_port):
+    def create_tcp_RST_ACK_packet(self,datapath,src_ip,src_mac,src_port,dst_ip,dst_mac,dst_port,ack,ofproto,out_port):
         # Define the Ethernet, IPv6 and TCP headers                                 
         eth_h = ethernet.ethernet(src=src_mac, dst=dst_mac, ethertype=0x86DD)
         ipv6_h = ipv6.ipv6(src=src_ip, dst=dst_ip, nxt=IPPROTO_TCP, hop_limit=64)
@@ -79,7 +79,7 @@ class MovingTargetDefense(app_manager.RyuApp):
         result = "0"
         while not foundPort:
             result = secrets.SystemRandom().randrange(1, 65535)
-            if not result in self.r2v_port_map.keys() and not result in self.r2v_port_map.values():
+            if not result in self.r2v_port_map.keys() and not result in self.r2v_port_map.values() :#and result < 1000:
                 foundPort = True
         return result
     
@@ -104,7 +104,7 @@ class MovingTargetDefense(app_manager.RyuApp):
         parser = datapath.ofproto_parser
         match = parser.OFPMatch()
         flow_mod = datapath.ofproto_parser.OFPFlowMod(datapath, 0, 0, 0, ofProto.OFPFC_DELETE, 0, 0, 1,
-                                                        ofProto.OFPCML_NO_BUFFER, ofProto.OFPP_ANY, ofProto.OFPG_ANY, 0, match=match, instructions=[])
+                                                      ofProto.OFPCML_NO_BUFFER, ofProto.OFPP_ANY, ofProto.OFPG_ANY, 0, match=match, instructions=[])
         datapath.send_msg(flow_mod)
 
 
@@ -116,7 +116,7 @@ class MovingTargetDefense(app_manager.RyuApp):
         self.datapaths.add(datapath)
         match = parser.OFPMatch()
         actions = [parser.OFPActionOutput(ofproto.OFPP_CONTROLLER,
-                                            ofproto.OFPCML_NO_BUFFER)]
+                                          ofproto.OFPCML_NO_BUFFER)]
         self.add_flow(datapath, 0, match, actions)
 
     @set_ev_cls(EventMessage)
@@ -177,7 +177,7 @@ class MovingTargetDefense(app_manager.RyuApp):
         parser = datapath.ofproto_parser
 
         inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS,
-                                                actions)]
+                                             actions)]
         if buffer_id:
             if hard_timeout == None:
                 mod = parser.OFPFlowMod(datapath=datapath, buffer_id=buffer_id,
@@ -205,7 +205,7 @@ class MovingTargetDefense(app_manager.RyuApp):
 
         if ev.msg.msg_len < ev.msg.total_len:
             self.logger.debug("packet truncated: only %s of %s bytes",
-                                ev.msg.msg_len, ev.msg.total_len)
+                              ev.msg.msg_len, ev.msg.total_len)
         msg = ev.msg
         datapath = msg.datapath
         ofproto = datapath.ofproto
@@ -250,7 +250,7 @@ class MovingTargetDefense(app_manager.RyuApp):
         if tcp_header != None:
             #check if dst port is not protected, if it is, create a TCP RST ACK packet and send as answer of the packet and drop the old answer 
             if not self.legit_TCP_SYN_ACK_MSG and tcp_header.has_flags(tcp.TCP_ACK, tcp.TCP_SYN) and tcp_header.src_port in self.r2v_port_map.keys() and datapath.id == self.host_attachments[ipv6_header.src]:
-                self.create_tcp_RST_ACK_packet(datapath,ipv6_header.src,eth.src,tcp_header.src_port,ipv6_header.dst,eth.dst,tcp_header.dst_port,tcp_header.ack,out_port)
+                self.create_tcp_RST_ACK_packet(datapath,ipv6_header.src,eth.src,tcp_header.src_port,ipv6_header.dst,eth.dst,tcp_header.dst_port,tcp_header.ack,ofproto,out_port)
                 return
             self.handle_tcp_packets(tcp_header, ipv6_header, actions, parser, datapath)
         
