@@ -245,12 +245,6 @@ class MovingTargetDefense(MtdSwitch):
                 elif icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REPLY and ipv6_header.src in self.addr_map.keys() and ipv6_header.src not in self.addr_map.values():
                     actions.append(parser.OFPActionSetField(ipv6_src=self.addr_map[ipv6_header.src]))
 
-                # for destination unreachable (port unreachable) messages of nmap udp port scans
-                elif icmpv6_header.type_ == icmpv6.ICMPV6_DST_UNREACH and ipv6_header.src in self.addr_map.keys() and datapath.id == self.HostAttachments[ipv6_header.src]:
-                    actions.append(parser.OFPActionSetField(ipv6_src=self.addr_map[ipv6_header.src]))
-
-                    
-
 
     def handle_tcp_packets(self, tcp_header, ipv6_header, actions, parser, datapath):
         self.tcp_ip_shuffling(tcp_header, ipv6_header, actions, parser, datapath)
@@ -362,6 +356,10 @@ class MovingTargetDefense(MtdSwitch):
                 return
     
             elif icmpv6_header.type_ == icmpv6.ND_NEIGHBOR_ADVERT and not self.answer_to_ICMP_SOLICIT and ipv6_header.src in self.addr_map.keys() and datapath.id == self.HostAttachments[ipv6_header.dst] and (type(icmpv6_header.data) is nd_neighbor and icmpv6_header.data.option != None):
+                return
+            
+            # for destination unreachable (port unreachable) messages of nmap udp port scans (see wireshark). Also used so that traceroute6 dont work on the real ip address of a protected host
+            elif icmpv6_header.type_ == icmpv6.ICMPV6_DST_UNREACH and ipv6_header.src in self.addr_map.keys() and datapath.id == self.HostAttachments[ipv6_header.src]:
                 return
 
             self.handle_icmpv6_packets(icmpv6_header, ipv6_header, eth_header, actions, parser, datapath)
