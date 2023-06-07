@@ -40,7 +40,6 @@ class MovingTargetDefense(app_manager.RyuApp):
         self.legit_TCP_SYN_ACK_MSG = False
 
     def start(self):
-        # self.send_event_to_observers(EventMessage("TIMEOUT"))
         super(MovingTargetDefense, self).start()
         self.threads.append(hub.spawn(self.TimerEventGen))
 
@@ -50,7 +49,7 @@ class MovingTargetDefense(app_manager.RyuApp):
                 print("please start the mininet topology")
             else:
                 self.send_event_to_observers(EventMessage("TIMEOUT"))
-            hub.sleep(1000)
+            hub.sleep(10000)
 
     def create_tcp_RST_ACK_packet(self,datapath,src_ip,src_mac,src_port,dst_ip,dst_mac,dst_port,ack,ofproto,out_port):
         # Define the Ethernet, IPv6 and TCP headers                                 
@@ -79,7 +78,7 @@ class MovingTargetDefense(app_manager.RyuApp):
         result = "0"
         while not foundPort:
             result = secrets.SystemRandom().randrange(1, 65535)
-            if not result in self.r2v_port_map.keys() and not result in self.r2v_port_map.values() :#and result < 1000:
+            if not result in self.r2v_port_map.keys() and not result in self.r2v_port_map.values():
                 foundPort = True
         return result
     
@@ -241,6 +240,7 @@ class MovingTargetDefense(app_manager.RyuApp):
         ipv6_header = pkt.get_protocol(ipv6.ipv6)
         tcp_header = pkt.get_protocol(tcp.tcp)
         udp_header = pkt.get_protocol(udp.udp)
+        icmpv6_header = pkt.get_protocol(icmpv6.icmpv6)
 
         actions = []
 
@@ -258,6 +258,11 @@ class MovingTargetDefense(app_manager.RyuApp):
             self.handle_udp_packets(udp_header, ipv6_header, actions, parser, datapath)  
             
         actions.append(parser.OFPActionOutput(out_port))
+
+        if icmpv6_header != None and (icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REQUEST or icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REPLY): 
+            # ip_proto=58 => 58 = ICMPv6
+            match = parser.OFPMatch(eth_type=0x86DD, in_port=in_port, eth_dst=dst, ipv6_dst=ipv6_header.dst, ipv6_src=ipv6_header.src, ip_proto=58, icmpv6_type=icmpv6_header.type_)
+            self.add_flow(datapath, 1, match, actions)
 
         if tcp_header != None: 
             # ip_proto=6 => 6 = TCP

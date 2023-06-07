@@ -31,7 +31,8 @@ class MovingTargetDefense(MtdSwitch):
         self.HostAttachments={}
         self.offset_of_mappings=0
         self.saved_datapath_id=0
-        self.protected_hosts = ["00:00:00:00:00:01", "00:00:00:00:00:02"]
+        self.protected_hosts = ["00:00:00:00:00:01",
+                                "00:00:00:00:00:02"]
         self.r2v_port_map = {22: 0, 
                             443: 0, 
                             80: 0,
@@ -48,7 +49,7 @@ class MovingTargetDefense(MtdSwitch):
     def TimerEventGen(self):
         while 1:
             self.send_event_to_observers(EventMessage("TIMEOUT"))
-            hub.sleep(1000)
+            hub.sleep(10000)
 
     def EmptyTable(self, datapath):
         '''
@@ -86,7 +87,7 @@ class MovingTargetDefense(MtdSwitch):
         result = "0"
         while not foundPort:
             result = secrets.SystemRandom().randrange(1, 65535)
-            if not result in self.r2v_port_map.keys() and not result in self.r2v_port_map.values() and result < 1000: #result < 1000 für prod. wegnehmen!
+            if not result in self.r2v_port_map.keys() and not result in self.r2v_port_map.values():
                 foundPort = True
         return result
     
@@ -243,7 +244,7 @@ class MovingTargetDefense(MtdSwitch):
                         ipv6_dst=self.get_real_ip(ipv6_header.dst)))
 
                 elif icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REPLY and ipv6_header.src in self.addr_map.keys() and ipv6_header.src not in self.addr_map.values():
-                    actions.append(parser.OFPActionSetField(ipv6_src=self.addr_map[ipv6_header.src]))
+                    actions.append(parser.OFPActionSetField(ipv6_src=self.addr_map[ipv6_header.src]))            
 
 
     def handle_tcp_packets(self, tcp_header, ipv6_header, actions, parser, datapath):
@@ -357,7 +358,7 @@ class MovingTargetDefense(MtdSwitch):
     
             elif icmpv6_header.type_ == icmpv6.ND_NEIGHBOR_ADVERT and not self.answer_to_ICMP_SOLICIT and ipv6_header.src in self.addr_map.keys() and datapath.id == self.HostAttachments[ipv6_header.dst] and (type(icmpv6_header.data) is nd_neighbor and icmpv6_header.data.option != None):
                 return
-            
+
             # for destination unreachable (port unreachable) messages of nmap udp port scans (see wireshark). Also used so that traceroute6 dont work on the real ip address of a protected host
             elif icmpv6_header.type_ == icmpv6.ICMPV6_DST_UNREACH and ipv6_header.src in self.addr_map.keys() and datapath.id == self.HostAttachments[ipv6_header.src]:
                 return
@@ -372,13 +373,17 @@ class MovingTargetDefense(MtdSwitch):
                     ipv6_header_src = self.addr_map[ipv6_header.src]
                 self.create_tcp_RST_ACK_packet(datapath,ipv6_header_src,eth_header.src,tcp_header.src_port,ipv6_header.dst,eth_header.dst,tcp_header.dst_port,tcp_header.ack,out_port)
                 return
-            
             self.handle_tcp_packets(tcp_header, ipv6_header, actions, parser, datapath)
             
         if udp_header != None:
             self.handle_udp_packets(udp_header, ipv6_header, actions, parser, datapath)
 
         actions.append(parser.OFPActionOutput(out_port))
+
+        if icmpv6_header != None and (icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REQUEST or icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REPLY): 
+            # ip_proto=58 => 58 = ICMPv6
+            match = parser.OFPMatch(eth_type=0x86DD, in_port=in_port, eth_dst=dst, ipv6_dst=ipv6_header.dst, ipv6_src=ipv6_header.src, ip_proto=58, icmpv6_type=icmpv6_header.type_)
+            self.add_flow(datapath, 1, match, actions)
 
         if tcp_header != None: 
             # ip_proto=6 => 6 = TCP

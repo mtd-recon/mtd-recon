@@ -60,7 +60,8 @@ class MovingTargetDefense(MtdSwitch):
         self.offset_of_mappings=0
         self.answer_to_ICMP_SOLICIT=False
         self.saved_datapath_id=0
-        self.protected_hosts = ["00:00:00:00:00:01", "00:00:00:00:00:02"]
+        self.protected_hosts = ["00:00:00:00:00:01",
+                                "00:00:00:00:00:02"]
         self.addr_map = {}
 
     def start(self):
@@ -70,7 +71,7 @@ class MovingTargetDefense(MtdSwitch):
     def TimerEventGen(self):
         while 1:
             self.send_event_to_observers(EventMessage("TIMEOUT"))
-            hub.sleep(60)
+            hub.sleep(10000)
 
     def EmptyTable(self, datapath):
         '''
@@ -278,6 +279,11 @@ class MovingTargetDefense(MtdSwitch):
             self.handle_udp_packets(ipv6_header, actions, parser)
 
         actions.append(parser.OFPActionOutput(out_port))
+
+        if icmpv6_header != None and (icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REQUEST or icmpv6_header.type_ == icmpv6.ICMPV6_ECHO_REPLY): 
+            # ip_proto=58 => 58 = ICMPv6
+            match = parser.OFPMatch(eth_type=0x86DD, in_port=in_port, eth_dst=dst, ipv6_dst=ipv6_header.dst, ipv6_src=ipv6_header.src, ip_proto=58, icmpv6_type=icmpv6_header.type_)
+            self.add_flow(datapath, 1, match, actions)
 
         if tcp_header != None: 
             # ip_proto=6 => 6 = TCP
