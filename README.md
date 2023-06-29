@@ -1,7 +1,7 @@
 # MTD against reconnaissance
 
 ## Description
-
+This is an MTD project written to accompany our bachelor's thesis. It contains two main components IP-Shuffling and Port-Shuffling. The controller switches real IPs to virtual IPs and vice versa. The same principle applies for the ports. All traffic addressed to real IPs/ports is dropped. This way, clients are forced to address the servers by the shuffled virtual addresses/ports.
 
 ## Prerequisites
 * Ubuntu 16.04 LTS (or later)
@@ -28,6 +28,4 @@ ryu-manager ryu_controller.py
 * [Gürkan Gür](https://github.com/gurgurka)
 * [Wissem Soussi](https://github.com/wsoussi)
 
-## License
 
-The last section of a high-quality README file is the license. This lets other developers know what they can and cannot do with your project. If you need help choosing a license, refer to [https://choosealicense.com/](https://choosealicense.com/).
