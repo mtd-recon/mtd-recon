@@ -49,7 +49,7 @@ class MovingTargetDefense(app_manager.RyuApp):
                 print("please start the mininet topology")
             else:
                 self.send_event_to_observers(EventMessage("TIMEOUT"))
-            hub.sleep(10000)
+            hub.sleep(30)
 
     def create_tcp_RST_ACK_packet(self,datapath,src_ip,src_mac,src_port,dst_ip,dst_mac,dst_port,ack,ofproto,out_port):
         # Define the Ethernet, IPv6 and TCP headers                                 

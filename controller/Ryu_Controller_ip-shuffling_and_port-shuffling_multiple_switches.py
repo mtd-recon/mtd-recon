@@ -49,7 +49,7 @@ class MovingTargetDefense(MtdSwitch):
     def TimerEventGen(self):
         while 1:
             self.send_event_to_observers(EventMessage("TIMEOUT"))
-            hub.sleep(10000)
+            hub.sleep(30)
 
     def EmptyTable(self, datapath):
         '''
